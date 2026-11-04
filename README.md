@@ -201,8 +201,10 @@ Observed on 2026-11-04:
 - The live Orca GUI was launched through MCP. Model loading, removal, rotation,
   placement, preset selection, settings changes and PNG rendering were exercised
   through the server against the running GUI.
-- Physical start, pause/resume/cancel and CFS execution have protocol simulation
-  coverage, but have not been exercised on the real printer.
+- A physical CFS start with explicit filament mapping was accepted by the real Hi;
+  telemetry confirmed the expected active file and initial heating without a
+  reported fault. This validates launch admission, not completion of a print.
+  Pause/resume/cancel still have protocol simulation coverage only.
 
 Use `orca-slicer-mcp` from the AUR package or set `ORCA_SLICER_BIN` to a compatible
 AppImage. A successful slice is not a hardware compatibility certification for
