@@ -5,6 +5,11 @@ an OCaml MCP server built with **mcp-kit 0.2.0**. OrcaSlicer handles slicing;
 the server connects directly to the Hi for status, CFS data, upload and print
 control. Orca does not need to discover the printer.
 
+This is a hybrid application: a small **OCaml MCP host** declares the tools and
+delegates protocol handling to mcp-kit; a **Python application adapter** implements
+the slicer, profiles, filesystem and Creality LAN integrations. It uses the Orca
+fork's HTTP API directly, without running the upstream Python Orca MCP server.
+
 The CLI workflow works without an open slicer window. The optional Orca Remote
 API workflow edits a running slicer so you can see the agent's changes.
 
@@ -16,6 +21,7 @@ GNU `timeout`, and Creality Print or OrcaSlicer. The server uses the maintained
 implement MCP or JSON-RPC itself.
 
 ```sh
+opam pin add mcp-kit git+https://gitlab.com/nomadic-labs/ai-harness/ocaml-mcp.git#24c3dfd86d1660e5e09db9ded6fe49a82ad34971 --no-action
 opam install . --deps-only
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
@@ -24,6 +30,10 @@ cp .env.example .env  # only when .env does not already exist
 ./scripts/run
 ```
 
+The immutable mcp-kit revision above is the tested 0.2.0 development revision;
+the original `v0.2.0` tag does not provide the compatibility API this host uses.
+CI uses the same pin. Run the build and launcher in the selected opam environment.
+
 `scripts/run` reads `.env` and serves MCP over stdin/stdout. It writes no
 startup text to stdout. Add this entry to a client that accepts `mcpServers`:
 
@@ -31,14 +41,14 @@ startup text to stdout. Add this entry to a client that accepts `mcpServers`:
 {
   "mcpServers": {
     "creality-print": {
-      "command": "/home/mathias/dev/creality-print-mcp/scripts/run"
+      "command": "/absolute/path/to/creality-print-mcp/scripts/run"
     }
   }
 }
 ```
 
-This checkout's ignored `.env` contains the Hi's local IP. Tokens belong in
-that ignored file or in the client's environment, never in committed config.
+Set the Hi's IP in your ignored `.env`. Tokens belong in that ignored file or
+in the client's environment, never in committed config.
 
 ## Prepare a print without the GUI
 
@@ -93,20 +103,31 @@ from the [Python MCP server](https://github.com/MaxEllis/orcaslicer-mcp).
 This project uses that build's REST API with mcp-kit as the MCP host.
 The upstream Python server is not a runtime dependency.
 
-Launch `orca-slicer-mcp`, finish printer-profile setup, then enable
-**Preferences → Remote API → Enable Remote API**. Set `ORCA_API_TOKEN` in `.env`
-to its token. The API address defaults to `http://127.0.0.1:13130` and this
-adapter accepts loopback origins only. CLI slicing needs neither the token nor
-an open GUI. The fork shares the regular OrcaSlicer configuration directory.
+Call `launch_orca` to open the MCP fork. If Orca is closed and its configuration
+already exists, this tool backs up that file and enables the loopback Remote API.
+It does not change configuration owned by a running GUI. On a fresh install,
+finish printer-profile setup and enable **Preferences → Remote API → Enable
+Remote API** if needed. The server reads the API token from the local Orca
+configuration without displaying it; `ORCA_API_TOKEN` overrides it when set.
+The API address defaults to `http://127.0.0.1:13130` and this adapter accepts
+loopback origins only. CLI slicing needs neither the token nor an open GUI.
+The fork shares the regular OrcaSlicer configuration directory.
 
 Call `orca_status` and `orca_presets`, then select the printer, filament and
 print presets with `orca_select_preset` (`type`: `printer`, `filament`, `print`).
 Selecting a preset can discard unsaved overrides, so select all presets before
-applying changes. `orca_load_model`, `orca_objects`, `orca_transform`,
-`orca_arrange` and `orca_orient` prepare the model. Rotations use degrees.
+applying changes. Read back material type, temperatures and print settings after
+selection rather than relying only on the preset name.
+`orca_load_model`, `orca_objects`, `orca_transform`, `orca_delete_object`,
+`orca_arrange` and `orca_orient` prepare the model. `orca_job_status` reports
+background orientation/arrangement progress. Translations (mm) and rotations
+(degrees) are relative increments; scale factors are absolute. Returned rotations
+are normalized to degrees, unlike the fork's raw API, which returns radians.
 `orca_config` reads settings; `orca_set_config` changes them. `orca_slice`
-starts slicing; poll `orca_slice_status`, then use `orca_save_gcode` to save
+starts slicing; poll `orca_slice_status` (`orca_cancel_slice` cancels it), then use `orca_save_gcode` to save
 the resulting file for the inspection/upload/start workflow above.
+`orca_render_plate` returns a real editor or toolpath PNG as an MCP image block
+and saves it under the workspace's `renders` directory for later review.
 
 An Orca connection failure does not imply a Hi connection failure. `orca_*`
 tools contact the local slicer; `printer_status` and print controls contact
@@ -125,7 +146,7 @@ tools contact the local slicer; `printer_status` and print controls contact
 | `CREALITY_PROFILE_ROOTS` | Colon-separated roots; default Creality version directories and `~/.config/OrcaSlicer` |
 | `CREALITY_MCP_STATE` | `~/.local/state/creality-print-mcp`; jobs, resolved presets, exports and upload receipts |
 | `ORCA_API_URL` | `http://127.0.0.1:13130` |
-| `ORCA_API_TOKEN` | Required only for GUI API tools |
+| `ORCA_API_TOKEN` | Optional override; otherwise read from local Orca configuration |
 | `CREALITY_MCP_PYTHON` | Launcher uses `.venv/bin/python` when present, otherwise `python3` |
 
 The server has the local user's filesystem access. Resolved presets and G-code
@@ -133,6 +154,8 @@ remain on disk until removed. Deleting an active job directory interrupts its
 bookkeeping. Preset tools exclude post-processing/scripts and connection edits;
 machine G-code comes from the selected existing machine preset. Transport is
 local stdio; this server exposes no network listener.
+G-code export streams to disk and accepts files up to 1 GiB; JSON and image
+responses remain limited to 32 MiB. Failed exports remove their partial file.
 
 ## Verification and current limits
 
@@ -150,13 +173,16 @@ Observed on 2026-11-04:
   G-code appeared in its file list. No print was started.
 - The installed Creality Print **7.1.0.4414** CLI crashed while slicing the cube.
   The server detects this as a failed job; use the tested Orca backend here.
+- The live Orca GUI was launched through MCP. Model loading, removal, rotation,
+  placement, preset selection, settings changes and PNG rendering were exercised
+  through the server against the running GUI.
 - Physical start, pause/resume/cancel and CFS execution have protocol simulation
-  coverage, but have not been exercised on the real printer. The live Orca GUI
-  API requires user setup and has not been validated against a running GUI here.
+  coverage, but have not been exercised on the real printer.
 
-The tested Orca AppImage is available locally as `~/.local/bin/orca-slicer-mcp`;
-it was installed without changing system packages. A successful slice is not a
-hardware compatibility certification for every material or CFS combination.
+Use `orca-slicer-mcp` from the AUR package or set `ORCA_SLICER_BIN` to a compatible
+AppImage. A successful slice is not a hardware compatibility certification for
+every material or CFS combination. Source models and generated toolpaths are
+user artifacts, not part of this repository.
 
 Protocol references: CrealityPrint revision
 [`254250c`](https://github.com/CrealityOfficial/CrealityPrint/tree/254250c015a5f8c5b9bf3742e89066c8a7095565),

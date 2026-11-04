@@ -3,5 +3,8 @@ synopsis: "MCP tools for Creality Print, OrcaSlicer Remote API and Creality Hi L
 maintainer: "Mathias Bourgoin"
 authors: ["Mathias Bourgoin"]
 license: "MIT"
-depends: ["ocaml" {>= "4.14"} "dune" {>= "3.11"} "mcp-kit" {= "0.2.0"} "yojson"]
+homepage: "https://github.com/mathiasbourgoin/creality-print-mcp"
+bug-reports: "https://github.com/mathiasbourgoin/creality-print-mcp/issues"
+dev-repo: "git+https://github.com/mathiasbourgoin/creality-print-mcp.git"
+depends: ["ocaml" {>= "5.1"} "dune" {>= "3.11"} "mcp-kit" {= "0.2.0"} "yojson"]
 build: [["dune" "build" "@all"]]

@@ -33,8 +33,13 @@ let invoke name args =
           let reply = Yojson.Safe.from_file output in
           let error = Yojson.Safe.Util.member "error" reply in
           if error <> `Null then Ok (T.error_text (Yojson.Safe.Util.to_string error))
-          else Ok {T.content = [T.Text (Yojson.Safe.to_string reply)];
-                   is_error = false; structured_content = Some reply}
+          else
+            let picture = Yojson.Safe.Util.member "image_base64" reply in
+            let reply = match reply with `Assoc xs -> `Assoc (List.remove_assoc "image_base64" xs) | x -> x in
+            let content = match picture with
+              | `String data -> [T.Text (Yojson.Safe.to_string reply); T.image_content ~mime_type:"image/png" ~data]
+              | _ -> [T.Text (Yojson.Safe.to_string reply)] in
+            Ok {T.content; is_error = false; structured_content = Some reply}
       | _ -> Ok (T.error_text "Backend interrupted or timed out; inspect job/printer status before retrying a mutation."))
 
 let tool name description required properties =
@@ -69,19 +74,26 @@ let tools = [
   tool "resume_print" "Request printer resume; verify resulting state with printer_status." [] [];
   tool "cancel_print" "Request cancellation of the current physical print; verify with printer_status." [] [];
   tool "orca_status" "Read OrcaSlicer Remote API state. Requires the AUR MCP fork running with Remote API enabled and ORCA_API_TOKEN." [] [];
+  tool "launch_orca" "Open the OrcaSlicer MCP GUI. When closed, enable its loopback Remote API with a configuration backup. Reuses the local API token without displaying it." []
+    ["enable_api",bool];
+  tool "orca_render_plate" "Save a real PNG render of the running Orca plate to the MCP workspace, for visual review." []
+    ["view",enum ["editor";"preview"]; "angle",enum ["iso";"top";"front";"left";"right";"rear";"bottom"]];
   tool "orca_presets" "List presets from the running OrcaSlicer MCP fork." [] [];
   tool "orca_objects" "List objects and placement in the running OrcaSlicer." [] [];
+  tool "orca_delete_object" "Remove one object from the open plate by its ID; leaves the source model file intact." ["object_id"] ["object_id",int];
+  tool "orca_job_status" "Read progress of background arrangement/orientation in the running OrcaSlicer." [] [];
   tool "orca_load_model" "Load a model into the running OrcaSlicer GUI." ["path"] ["path",str];
   tool "orca_select_preset" "Select a printer, process or filament preset in the running OrcaSlicer." ["type";"name"]
     ["type",enum ["printer";"print";"filament"];"name",str];
   tool "orca_config" "Read effective settings in running OrcaSlicer, with credentials redacted." [] [];
   tool "orca_set_config" "Update print settings in running OrcaSlicer; scripts/G-code/connection edits are excluded." ["changes"] ["changes",obj];
-  tool "orca_transform" "Transform an object. Rotations are in degrees; see the fork API for position/scale semantics." ["object_id";"transform"]
+  tool "orca_transform" "Transform an object. Translation (mm) and rotation (degrees) are relative increments; scale is absolute. Returned rotations are degrees." ["object_id";"transform"]
     ["object_id",int;"transform",S.object_ ~properties:["translate",S.array ~min_items:3 ~max_items:3 (S.number ());"rotate",S.array ~min_items:3 ~max_items:3 (S.number ());"scale",S.array ~min_items:3 ~max_items:3 (S.number ())] ~additional_properties:false ()];
   tool "orca_arrange" "Arrange models on the plate in running OrcaSlicer." [] [];
   tool "orca_orient" "Start automatic orientation in running OrcaSlicer." [] [];
   tool "orca_slice" "Start GUI slicing asynchronously in running OrcaSlicer; poll orca_slice_status." [] [];
   tool "orca_slice_status" "Read GUI slicing progress/results." [] [];
+  tool "orca_cancel_slice" "Cancel slicing in OrcaSlicer; does not contact the printer." [] [];
   tool "orca_save_gcode" "Save the current successful OrcaSlicer slice to the MCP workspace for inspection and upload." [] [];
 ]
 

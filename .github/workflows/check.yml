@@ -1,0 +1,28 @@
+name: Build and test
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.3"
+          opam-pin: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Pin tested mcp-kit revision
+        run: opam pin add mcp-kit git+https://gitlab.com/nomadic-labs/ai-harness/ocaml-mcp.git#24c3dfd86d1660e5e09db9ded6fe49a82ad34971 --no-action --yes
+      - name: Install dependencies
+        run: |
+          opam install . --deps-only --yes
+          python3 -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+      - name: Compile and test without a printer or GUI
+        run: opam exec -- ./scripts/check

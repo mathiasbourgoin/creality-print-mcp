@@ -1,6 +1,7 @@
 import asyncio
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -57,6 +58,17 @@ class BackendTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 b.check_changes({key: "x"})
 
+    def test_orca_rotation_units_match_transform_input(self):
+        wire = {"objects": [{"transform": {"rotation": [math.pi / 2, 0, -math.pi]}}]}
+        with patch.object(b, "orca_request", return_value=wire):
+            result = b.orca("orca_objects", {})
+        self.assertEqual(result["rotation_unit"], "degrees")
+        self.assertEqual(result["objects"][0]["transform"]["rotation"], [90, 0, -180])
+        with patch.object(b, "orca_request", return_value={"transform": {"rotation": [math.pi, 0, 0]}}) as call:
+            result = b.orca("orca_transform", {"object_id": 65, "transform": {"rotate": [90, 0, 0]}})
+        self.assertEqual(call.call_args.args[2], {"rotate": [90, 0, 0]})
+        self.assertEqual(result["transform"]["rotation"], [180, 0, 0])
+
     def test_async_slice_requires_artifacts(self):
         fake = self.root / "slicer"
         fake.write_text('#!/usr/bin/env python3\nimport sys,pathlib\nif "--help" in sys.argv: print("--slice --load-settings --load-filaments --arrange"); sys.exit(0)\np=pathlib.Path(sys.argv[sys.argv.index("--outputdir")+1]); p.mkdir(); (p/"cube.gcode").write_text("; estimate: 1m\\nG1 X0\\n")\n')
@@ -107,6 +119,30 @@ class BackendTests(unittest.TestCase):
                 self.assertTrue(requests[0][0].startswith("/upload/"))
                 self.assertIn(b"G1 X1", requests[0][1])
                 self.assertEqual(b.orca("orca_config", {})["token_seen"], "[redacted]")
+        finally:
+            server.shutdown(); server.server_close(); thread.join()
+
+    def test_gcode_export_streams_past_json_response_limit(self):
+        size = 33 * 1024 * 1024
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(size))
+                self.end_headers()
+                chunk = b"; streaming export test\n".ljust(1024 * 1024, b" ")
+                for _ in range(33):
+                    self.wfile.write(chunk)
+            def log_message(self, *args):
+                pass
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with patch.dict(os.environ, {"ORCA_API_URL": f"http://127.0.0.1:{server.server_port}", "ORCA_API_TOKEN": "test-secret"}):
+                result = b.orca("orca_save_gcode", {})
+            self.assertEqual(result["size_bytes"], size)
+            self.assertEqual(Path(result["path"]).stat().st_size, size)
+            self.assertFalse(list(Path(result["path"]).parent.glob("*.part")))
         finally:
             server.shutdown(); server.server_close(); thread.join()
 

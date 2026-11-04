@@ -6,8 +6,10 @@ Orca REST operations follow MaxEllis/orcaslicer-mcp's documented client.
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -18,6 +20,7 @@ import tempfile
 import threading
 import time
 from urllib.parse import urlsplit
+from urllib.error import HTTPError
 from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHandler
 import uuid
 
@@ -119,7 +122,7 @@ def cli_help(exe):
         proc = subprocess.run([exe, "--help"], cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15)
     text = proc.stdout.decode(errors="replace")
     if not re.search(r"--slice\b", text):
-        raise ValueError("Slicer has no usable CLI --slice support")
+        raise ValueError("Slicer has no usable CLI --slice support: " + text[:1500])
     return text
 
 
@@ -238,14 +241,36 @@ class NoRedirect(HTTPRedirectHandler):
         raise ValueError("API redirect refused")
 
 
-def http(url, method="GET", data=None, headers=None, timeout=30):
+def http(url, method="GET", data=None, headers=None, timeout=30, destination=None):
     # LAN/loopback control never goes through a configured HTTP proxy.
     request = Request(url, data=data, headers=headers or {}, method=method)
-    with build_opener(ProxyHandler({}), NoRedirect()).open(request, timeout=timeout) as response:
-        payload = response.read(32 * 1024 * 1024 + 1)
-        if len(payload) > 32 * 1024 * 1024:
-            raise ValueError("Response exceeds 32 MiB")
-        return payload
+    try:
+        with build_opener(ProxyHandler({}), NoRedirect()).open(request, timeout=timeout) as response:
+            if destination is not None:
+                partial = destination.with_suffix(".part")
+                try:
+                    size = 0
+                    with partial.open("wb") as stream:
+                        while chunk := response.read(1024 * 1024):
+                            size += len(chunk)
+                            if size > 1024 * 1024 * 1024:
+                                raise ValueError("G-code export exceeds 1 GiB")
+                            stream.write(chunk)
+                    partial.replace(destination)
+                finally:
+                    partial.unlink(missing_ok=True)
+                return b""
+            payload = response.read(32 * 1024 * 1024 + 1)
+            if len(payload) > 32 * 1024 * 1024:
+                raise ValueError("Response exceeds 32 MiB")
+            return payload
+    except HTTPError as exc:
+        body = exc.read(4096).decode(errors="replace")
+        try:
+            body = json.dumps(redact(json.loads(body)))
+        except ValueError:
+            body = "Response was not JSON"
+        raise ValueError(f"API HTTP {exc.code}: {body}") from None
 
 
 def host():
@@ -350,8 +375,17 @@ def upload_gcode(a):
     return receipt
 
 
-def orca_request(method, path, data=None, raw=False):
+def orca_token():
     token = os.environ.get("ORCA_API_TOKEN", "").strip()
+    if not token:
+        config = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "OrcaSlicer/OrcaSlicer.conf"
+        if config.is_file():
+            token = json.loads(config.read_text()).get("app", {}).get("remote_api_token", "")
+    return token
+
+
+def orca_request(method, path, data=None, raw=False, destination=None):
+    token = orca_token()
     if not token:
         raise ValueError("Set ORCA_API_TOKEN from the running OrcaSlicer fork's Preferences > Remote API")
     base = os.environ.get("ORCA_API_URL", "http://127.0.0.1:13130").rstrip("/")
@@ -359,15 +393,72 @@ def orca_request(method, path, data=None, raw=False):
     if parsed.scheme not in {"http", "https"} or parsed.hostname not in {"127.0.0.1", "localhost", "::1"} or parsed.username or parsed.path not in {"", "/"}:
         raise ValueError("ORCA_API_URL must be a loopback HTTP(S) origin")
     payload = http(base + path, method, json.dumps(data).encode() if data is not None else None,
-                   {"X-Api-Token": token, "Content-Type": "application/json"}, timeout=130 if path == "/api/v1/model" else 30)
+                   {"X-Api-Token": token, "Content-Type": "application/json"}, timeout=130 if path == "/api/v1/model" else 30, destination=destination)
     return payload if raw else redact(json.loads(payload))
 
 
+def launch_orca(a):
+    exe = binary("orca")
+    if not exe:
+        raise ValueError("Install orcaslicer-mcp-bin or set ORCA_SLICER_BIN to the MCP fork")
+    try:
+        return {"already_running": True, "status": orca_request("GET", "/api/v1/status")}
+    except Exception:
+        pass
+    # Avoid overwriting configuration owned by a running GUI.
+    for p in Path("/proc").iterdir():
+        if p.name.isdecimal():
+            try:
+                name = (p / "comm").read_text().strip().lower()
+                if name in {"orca-slicer", "orcaslicer"}:
+                    raise ValueError("Orca is already running without a reachable API. Enable Remote API in its Preferences or close it before launch_orca.")
+            except (OSError, ProcessLookupError):
+                continue
+    config = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "OrcaSlicer/OrcaSlicer.conf"
+    if a.get("enable_api", True) and config.exists():
+        data = json.loads(config.read_text())
+        backup = state_dir() / ("orca-config-backup-" + uuid.uuid4().hex + ".json")
+        backup.write_bytes(config.read_bytes())
+        backup.chmod(0o600)
+        app = data.setdefault("app", {})
+        app.update(remote_api_enabled=True, remote_api_bind_lan=False)
+        write_json(config, data)
+        config.chmod(0o600)
+    env = dict(os.environ)
+    # Desktop-launched agents do not always inherit the compositor's environment.
+    # Copy only display-routing variables from the user's Plasma session.
+    for p in Path("/proc").iterdir():
+        if p.name.isdecimal():
+            try:
+                if (p / "comm").read_text().strip() == "plasmashell" and p.stat().st_uid == os.getuid():
+                    for entry in (p / "environ").read_bytes().split(b"\0"):
+                        key, sep, value = entry.partition(b"=")
+                        if sep and key.decode() in {"DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_SESSION_TYPE"}:
+                            env.setdefault(key.decode(), value.decode())
+                    break
+            except OSError:
+                continue
+    env.setdefault("GDK_BACKEND", "x11")
+    log = state_dir() / "orca-gui.log"
+    with log.open("ab") as stream:
+        child = subprocess.Popen([exe], env=env, cwd=state_dir(), stdin=subprocess.DEVNULL, stdout=stream, stderr=stream, start_new_session=True, close_fds=True)
+        threading.Thread(target=child.wait, daemon=True).start()
+    # Returning before GUI startup finishes lets the client show progress.
+    return {"launched": True, "pid": child.pid, "log": str(log), "next_tool": "orca_status"}
+
+
 def orca(action, a):
-    gets = {"orca_status": "status", "orca_presets": "presets", "orca_objects": "objects", "orca_config": "config", "orca_slice_status": "slice/status"}
+    gets = {"orca_status": "status", "orca_presets": "presets", "orca_objects": "objects", "orca_config": "config", "orca_slice_status": "slice/status", "orca_job_status": "jobs/status"}
     if action in gets:
-        return orca_request("GET", "/api/v1/" + gets[action])
-    posts = {"orca_arrange": "arrange", "orca_orient": "orient", "orca_slice": "slice"}
+        result = orca_request("GET", "/api/v1/" + gets[action])
+        if action == "orca_objects":
+            for obj in result.get("objects", []):
+                transform = obj.get("transform", {})
+                if "rotation" in transform:
+                    transform["rotation"] = [math.degrees(x) for x in transform["rotation"]]
+            result["rotation_unit"] = "degrees"
+        return result
+    posts = {"orca_arrange": "arrange", "orca_orient": "orient", "orca_slice": "slice", "orca_cancel_slice": "slice/cancel"}
     if action in posts:
         return orca_request("POST", "/api/v1/" + posts[action])
     if action == "orca_load_model":
@@ -378,23 +469,38 @@ def orca(action, a):
         check_changes(a["changes"])
         return orca_request("PUT", "/api/v1/config", a["changes"])
     if action == "orca_transform":
-        return orca_request("POST", f"/api/v1/objects/{int(a['object_id'])}/transform", a["transform"])
+        result = orca_request("POST", f"/api/v1/objects/{int(a['object_id'])}/transform", a["transform"])
+        if "rotation" in result.get("transform", {}):
+            result["transform"]["rotation"] = [math.degrees(x) for x in result["transform"]["rotation"]]
+            result["rotation_unit"] = "degrees"
+        return result
+    if action == "orca_delete_object":
+        return orca_request("DELETE", f"/api/v1/objects/{int(a['object_id'])}")
     if action == "orca_save_gcode":
-        data = orca_request("GET", "/api/v1/gcode", raw=True)
-        if not data:
-            raise ValueError("Slicer returned empty G-code")
         folder = state_dir() / "exports"
         folder.mkdir(exist_ok=True)
         path = folder / (uuid.uuid4().hex + ".gcode")
-        path.write_bytes(data)
+        orca_request("GET", "/api/v1/gcode", raw=True, destination=path)
         return inspect_gcode(str(path))
+    if action == "orca_render_plate":
+        view, angle = a.get("view", "editor"), a.get("angle", "iso")
+        data = orca_request("GET", f"/api/v1/plate/render?view={view}&angle={angle}&width=1280&height=900", raw=True)
+        if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValueError("Orca did not return a PNG render")
+        folder = state_dir() / "renders"
+        folder.mkdir(exist_ok=True)
+        path = folder / (uuid.uuid4().hex + ".png")
+        path.write_bytes(data)
+        return {"path": str(path), "view": view, "angle": angle, "image_base64": base64.b64encode(data).decode()}
     raise ValueError("Unknown Orca operation")
 
 
 def dispatch(name, a):
+    if name == "launch_orca":
+        return launch_orca(a)
     if name == "capabilities":
         return {"creality_binary": binary("creality"), "orca_binary": binary("orca"), "profile_roots": [str(p) for p in roots() if p.is_dir()],
-                "default_backend": default_backend(), "printer_configured": bool(os.environ.get("CREALITY_PRINTER_HOST")), "orca_api_configured": bool(os.environ.get("ORCA_API_TOKEN")), "state_dir": str(state_dir())}
+                "default_backend": default_backend(), "printer_configured": bool(os.environ.get("CREALITY_PRINTER_HOST")), "orca_api_configured": bool(orca_token()), "state_dir": str(state_dir())}
     if name == "list_presets":
         matches = [x for x in presets() if (not a.get("kind") or x["kind"] == a["kind"]) and a.get("query", "").casefold() in x["name"].casefold()]
         return {"total": len(matches), "presets": [{k: v for k, v in x.items() if k not in {"data", "root"}} for x in matches[:a.get("limit", 50)]]}
