@@ -133,6 +133,18 @@ An Orca connection failure does not imply a Hi connection failure. `orca_*`
 tools contact the local slicer; `printer_status` and print controls contact
 `CREALITY_PRINTER_HOST` over the stock Creality protocol, not Moonraker.
 
+### Display the printer in Orca's Device tab
+
+Some Hi firmware installations also expose Moonraker on port 7125 and a web UI
+on port 4408. Both endpoints were reachable on the tested Hi. In Orca's physical
+printer settings, use **Klipper / Moonraker** as the host type, set the host to
+`192.168.1.50:7125`, and set **Device UI** separately to
+`http://192.168.1.50:4408`, replacing the example IP with your printer's IP.
+This allows the embedded Device tab to show the printer's web interface; it does
+not establish native CFS synchronization in every Orca build. The MCP fork's API
+protects network settings from automated writes by default, so these fields must
+be set in the GUI unless that policy has explicitly been changed there.
+
 ## Configuration reference
 
 | Variable | Default / purpose |
