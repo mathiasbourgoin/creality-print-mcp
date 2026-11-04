@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+launcher_path="$(readlink -f -- "${BASH_SOURCE[0]}")"
+project_dir="$(cd -- "$(dirname -- "$launcher_path")/.." && pwd)"
+if [[ -f "$project_dir/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$project_dir/.env"
+  set +a
+fi
+export CREALITY_MCP_HELPER="$project_dir/python/backend.py"
+if [[ -z "${CREALITY_MCP_PYTHON:-}" && -x "$project_dir/.venv/bin/python" ]]; then
+  export CREALITY_MCP_PYTHON="$project_dir/.venv/bin/python"
+fi
+exec "$project_dir/_build/default/bin/main.exe"

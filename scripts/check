@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$project_dir"
+dune build @all
+python_bin="${CREALITY_MCP_PYTHON:-python3}"
+if [[ -x "$project_dir/.venv/bin/python" && -z "${CREALITY_MCP_PYTHON:-}" ]]; then
+  python_bin="$project_dir/.venv/bin/python"
+fi
+"$python_bin" -m unittest discover -s tests -v

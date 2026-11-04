@@ -1,0 +1,3 @@
+(executable
+ (name main)
+ (libraries mcp-kit mcp-kit.stdio yojson unix))
