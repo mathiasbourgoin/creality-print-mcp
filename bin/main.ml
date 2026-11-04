@@ -63,6 +63,8 @@ let tools = [
   tool "inspect_gcode" "Read G-code header and slicer estimates without executing it." ["path"] ["path",str];
   tool "printer_status" "Read stock Creality Hi LAN WebSocket telemetry, files and CFS data. Requires CREALITY_PRINTER_HOST. File list defaults to 20 entries." []
     ["file_limit",S.integer ~minimum:0. ~maximum:200. ()];
+  tool "printer_cameras" "Read camera configuration from the configured Hi's Moonraker service." [] [];
+  tool "configure_printer_camera" "Register the Hi's existing port-8000 WebRTC page as an HTTP Page camera in Moonraker/Fluidd. Preserves other cameras and reuses an existing matching entry." [] [];
   tool "upload_gcode" "Upload a local .gcode to the configured stock Creality printer over HTTP. Does not start printing." ["path"] ["path",str];
   tool "start_print" "Start an uploaded file on an idle stock Creality Hi. Returns observed state or unconfirmed; never automatically retries. CFS requires explicit filament mapping." ["remote_path"]
     ["remote_path",str; "calibration",bool; "use_cfs",bool;

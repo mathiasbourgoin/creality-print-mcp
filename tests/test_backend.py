@@ -69,6 +69,30 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(call.call_args.args[2], {"rotate": [90, 0, 0]})
         self.assertEqual(result["transform"]["rotation"], [180, 0, 0])
 
+    def test_camera_registration_and_legacy_idempotence(self):
+        stream = "http://127.0.0.1:8000/webcam/?action=stream"
+        camera = {"name": "Creality Hi", "service": "iframe", "stream_url": stream}
+        # The tested stock firmware omits uid and enabled in webcam responses.
+        with patch.dict(os.environ, {"CREALITY_PRINTER_HOST": "127.0.0.1"}):
+            with patch.object(b, "http", side_effect=[
+                json.dumps({"result": {"webcams": [{"name": "Other", "stream_url": "http://other/"}]}}).encode(),
+                b"<script>new RTCPeerConnection()</script>",
+                json.dumps({"result": {"webcam": camera}}).encode(),
+            ]) as request:
+                result = b.camera_config(configure=True)
+                self.assertTrue(result["changed"])
+                payload = json.loads(request.call_args.args[2])
+                self.assertEqual(payload["service"], "iframe")
+                self.assertEqual(payload["stream_url"], stream)
+                self.assertEqual(payload["snapshot_url"], "")
+                self.assertEqual(result["webcam"], camera)
+            with patch.object(b, "http", side_effect=[
+                json.dumps({"result": {"webcams": [camera]}}).encode(),
+                b"<script>new RTCPeerConnection()</script>",
+            ]) as request:
+                self.assertFalse(b.camera_config(configure=True)["changed"])
+                self.assertEqual(request.call_count, 2)  # No duplicate POST.
+
     def test_async_slice_requires_artifacts(self):
         fake = self.root / "slicer"
         fake.write_text('#!/usr/bin/env python3\nimport sys,pathlib\nif "--help" in sys.argv: print("--slice --load-settings --load-filaments --arrange"); sys.exit(0)\np=pathlib.Path(sys.argv[sys.argv.index("--outputdir")+1]); p.mkdir(); (p/"cube.gcode").write_text("; estimate: 1m\\nG1 X0\\n")\n')

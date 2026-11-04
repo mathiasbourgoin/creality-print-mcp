@@ -145,6 +145,18 @@ not establish native CFS synchronization in every Orca build. The MCP fork's API
 protects network settings from automated writes by default, so these fields must
 be set in the GUI unless that policy has explicitly been changed there.
 
+### Show the Hi camera
+
+Call `printer_cameras` to inspect Moonraker's camera entries, then
+`configure_printer_camera` to register the Hi's existing port-8000 camera page.
+The tested Hi serves an HTML page which negotiates WebRTC at
+`http://<printer-IP>:8000/webcam/?action=stream`. It must be embedded as Fluidd's
+**HTTP Page** (`iframe`) camera service, rather than treated as an MJPEG image
+stream. The tool preserves other cameras and reuses an existing matching entry,
+including on older firmware without webcam UIDs. Refresh Orca's Device tab after
+registration. Successful registration confirms configuration, not browser video
+decoding; test the direct camera page if the embedded player remains blank.
+
 ## Configuration reference
 
 | Variable | Default / purpose |
@@ -152,6 +164,7 @@ be set in the GUI unless that policy has explicitly been changed there.
 | `CREALITY_PRINTER_HOST` | Required for the printer; IP/hostname without a scheme or port |
 | `CREALITY_WS_PORT` | `9999`, stock Creality telemetry and commands |
 | `CREALITY_HTTP_PORT` | `80`, stock Creality upload |
+| `CREALITY_MOONRAKER_PORT` | `7125`, camera configuration only |
 | `CREALITY_GCODE_DIR` | `/mnt/UDISK/printer_data/gcodes`, remote upload path |
 | `CREALITY_PRINT_BIN` | Searches `creality-print`, `CrealityPrint` |
 | `ORCA_SLICER_BIN` | Searches `orca-slicer-mcp`, `orca-slicer`, `OrcaSlicer` |

@@ -375,6 +375,34 @@ def upload_gcode(a):
     return receipt
 
 
+def camera_config(configure=False):
+    base = f"http://{host()}:{int(os.environ.get('CREALITY_MOONRAKER_PORT', '7125'))}"
+    def request(path, data=None):
+        return json.loads(http(base + path, "POST" if data is not None else "GET",
+                               json.dumps(data).encode() if data is not None else None,
+                               {"Content-Type": "application/json"}))['result']
+    cameras = request('/server/webcams/list')['webcams']
+    if not configure:
+        return {"webcams": cameras}
+    stream = f"http://{host()}:8000/webcam/?action=stream"
+    page = http(stream).decode(errors='replace')
+    if 'RTCPeerConnection' not in page:
+        raise ValueError('Expected the Hi WebRTC camera page on port 8000; camera configuration unchanged')
+    existing = next((c for c in cameras if c.get('stream_url') == stream), None)
+    if existing and existing.get('service') == 'iframe' and existing.get('enabled', True):
+        return {"changed": False, "webcam": existing}
+    payload = {"name": "Creality Hi", "location": "printer", "service": "iframe",
+               "enabled": True, "stream_url": stream, "snapshot_url": "",
+               "aspect_ratio": "16:9", "target_fps": 15}
+    if existing:
+        if existing.get('uid'):
+            payload['uid'] = existing['uid']
+        else:
+            payload['name'] = existing['name']  # Older Moonraker identifies cameras by name.
+    result = request('/server/webcams/item', payload)
+    return {"changed": True, "webcam": result.get('webcam', result), "next_step": "Refresh the Device tab; the camera uses Fluidd's HTTP Page service."}
+
+
 def orca_token():
     token = os.environ.get("ORCA_API_TOKEN", "").strip()
     if not token:
@@ -496,6 +524,8 @@ def orca(action, a):
 
 
 def dispatch(name, a):
+    if name in {"printer_cameras", "configure_printer_camera"}:
+        return camera_config(configure=name == "configure_printer_camera")
     if name == "launch_orca":
         return launch_orca(a)
     if name == "capabilities":
