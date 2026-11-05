@@ -95,19 +95,20 @@ class BackendTests(unittest.TestCase):
 
     def test_async_slice_requires_artifacts(self):
         fake = self.root / "slicer"
-        fake.write_text('#!/usr/bin/env python3\nimport sys,pathlib\nif "--help" in sys.argv: print("--slice --load-settings --load-filaments --arrange"); sys.exit(0)\np=pathlib.Path(sys.argv[sys.argv.index("--outputdir")+1]); p.mkdir(); (p/"cube.gcode").write_text("; estimate: 1m\\nG1 X0\\n")\n')
+        fake.write_text('#!/usr/bin/env python3\nimport sys,pathlib\nif "--help" in sys.argv: print("--slice --load-settings --load-filaments --arrange --allow-mix-temp"); sys.exit(0)\np=pathlib.Path(sys.argv[sys.argv.index("--outputdir")+1]); p.mkdir(); (p/"cube.gcode").write_text("; estimate: 1m\\nG1 X0\\n")\n')
         fake.chmod(0o755)
         preset = self.preset("simple", {"name": "simple"})
         model = self.root / "model with spaces.stl"
         model.write_text("test model")
         with patch.dict(os.environ, {"CREALITY_PRINT_BIN": str(fake)}):
-            r = b.slice_model({"backend": "creality", "model": str(model), "machine": preset, "process": preset, "filaments": [preset], "arrange": True})
+            r = b.slice_model({"backend": "creality", "model": str(model), "machine": preset, "process": preset, "filaments": [preset], "arrange": True, "allow_mix_temp": True})
         for _ in range(100):
             job = b.slice_job(r["job_id"])
             if job["state"] not in {"queued", "running"}:
                 break
             time.sleep(.02)
         self.assertEqual(job["state"], "succeeded", job)
+        self.assertEqual(job["command"][-2:], ["--allow-mix-temp", str(model)])
         self.assertTrue(any(x.endswith("cube.gcode") for x in job["artifacts"]))
         fake.write_text('#!/usr/bin/env python3\nimport sys\nif "--help" in sys.argv: print("--slice --load-settings --load-filaments")\n')
         with patch.dict(os.environ, {"CREALITY_PRINT_BIN": str(fake)}):
@@ -118,6 +119,7 @@ class BackendTests(unittest.TestCase):
                 break
             time.sleep(.02)
         self.assertEqual(job["state"], "failed")
+        self.assertNotIn("--allow-mix-temp", job["command"])
 
     def test_http_upload_never_starts_and_orca_auth(self):
         requests = []

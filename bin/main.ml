@@ -57,6 +57,7 @@ let tools = [
   tool "slice_model" "Start an asynchronous local Creality Print or OrcaSlicer CLI job. Poll slice_job. Requires explicit machine/process/filament presets; inherited presets are flattened." ["model";"machine";"process";"filaments"]
     ["model",str; "machine",str; "process",str; "filaments",strings;
      "backend",enum ["creality";"orca"]; "plate",int; "arrange",bool; "orient",bool;
+     "allow_mix_temp",bool;
      "scale",S.number ~minimum:0.001 ~maximum:100. (); "rotate_z",S.number ();
      "timeout_seconds",S.integer ~minimum:10. ~maximum:7200. ()];
   tool "slice_job" "Read slicing state, output files and log tail. No printer commands." ["job_id"] ["job_id",str];

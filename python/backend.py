@@ -166,6 +166,8 @@ def slice_model(a):
     for key in ("arrange", "orient"):
         if key in a:
             cmd += [flag(key), str(int(a[key]))]
+    if a.get("allow_mix_temp", False):
+        cmd.append(flag("allow_mix_temp"))
     for key, cli_key in (("scale", "scale"), ("rotate_z", "rotate")):
         if key in a:
             cmd += [flag(cli_key), str(a[key])]

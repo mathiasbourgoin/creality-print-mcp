@@ -60,6 +60,10 @@ in the client's environment, never in committed config.
    `filaments` (an array). `backend` accepts `orca` or `creality`; the default
    is Orca when installed. Optional controls are `plate` (0 = all), `arrange`,
    `orient`, `scale`, `rotate_z` and `timeout_seconds` (default 1800).
+   For a deliberately configured mixed-material job, `allow_mix_temp: true`
+   passes the slicer's `--allow-mix-temp` switch. It defaults to false and
+   requires a CLI that advertises the option. This permits slicing different
+   temperature ranges; it does not validate material transitions or purging.
 3. Poll `slice_job` with the returned `job_id` until `succeeded` or `failed`.
    Success requires an exit code of zero and a nonempty `.gcode` artifact.
    `inspect_gcode` reads header information and time/filament estimates.
