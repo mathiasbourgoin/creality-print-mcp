@@ -65,6 +65,10 @@ let tools = [
   tool "printer_status" "Read stock Creality Hi LAN WebSocket telemetry, files and CFS data. Requires CREALITY_PRINTER_HOST. File list defaults to 20 entries." []
     ["file_limit",S.integer ~minimum:0. ~maximum:200. ()];
   tool "printer_cameras" "Read camera configuration from the configured Hi's Moonraker service." [] [];
+  tool "set_cfs_material" "Set metadata of one present, editable CFS slot while idle. Sends existing RFID and pressure values; firmware may reassign its catalog identifier. Does not heat, feed, or start printing. Verify with printer_status." ["box_id";"material_id";"material_type";"vendor";"name";"color";"min_temp";"max_temp"]
+    ["box_id",S.integer ~minimum:1. ~maximum:4. (); "material_id",S.integer ~minimum:0. ~maximum:3. ();
+     "material_type",enum ["PLA";"PETG";"ABS";"ASA";"PET";"HIPS";"PVA";"BVOH"];
+     "vendor",str; "name",str; "color",str; "min_temp",int; "max_temp",int];
   tool "configure_printer_camera" "Register the Hi's existing port-8000 WebRTC page as an HTTP Page camera in Moonraker/Fluidd. Preserves other cameras and reuses an existing matching entry." [] [];
   tool "upload_gcode" "Upload a local .gcode to the configured stock Creality printer over HTTP. Does not start printing." ["path"] ["path",str];
   tool "start_print" "Start an uploaded file on an idle stock Creality Hi. Returns observed state or unconfirmed; never automatically retries. CFS requires explicit filament mapping." ["remote_path"]

@@ -182,7 +182,8 @@ class WireTests(unittest.IsolatedAsyncioTestCase):
                 frames.append(json.loads(await ws.recv()))
                 if heartbeat:
                     await ws.send("ok")
-                await ws.send(json.dumps({"deviceState": state, "nozzleTemp": 25}))
+                snapshot = state if isinstance(state, dict) else {"deviceState": state, "nozzleTemp": 25}
+                await ws.send(json.dumps(snapshot))
                 async for raw in ws:
                     frame = json.loads(raw)
                     frames.append(frame)
@@ -205,6 +206,23 @@ class WireTests(unittest.IsolatedAsyncioTestCase):
     async def test_busy_printer_refuses_start(self):
         with self.assertRaisesRegex(ValueError, "not confirmed idle"):
             await self.run_printer(1, "start_print", {"remote_path": "/usr/data/printer_data/gcodes/cube.gcode"})
+
+    async def test_cfs_metadata_only_and_preserves_calibration(self):
+        slot = {"id": 0, "state": 1, "editStatus": 1, "rfid": "00001", "pressure": 0.04}
+        state = {"deviceState": 0, "boxsInfo": {"materialBoxs": [{"id": 1, "type": 0, "materials": [slot]}]}}
+        args = {"box_id": 1, "material_id": 0, "material_type": "PLA", "vendor": "eSUN",
+                "name": "PLA Lite", "color": "#000000", "min_temp": 190, "max_temp": 230}
+        result, frames = await self.run_printer(state, "set_cfs_material", args)
+        self.assertTrue(result["command_sent_once"])
+        self.assertEqual(len(frames), 2)
+        material = frames[1]["params"]["modifyMaterial"]
+        self.assertEqual(material["rfid"], "00001")
+        self.assertEqual(material["pressure"], 0.04)
+        self.assertEqual(material["color"], "#0000000")
+        self.assertEqual(material["vendor"], "eSUN")
+        self.assertEqual(set(frames[1]["params"]), {"modifyMaterial"})
+        with self.assertRaisesRegex(ValueError, "not confirmed idle"):
+            await self.run_printer(1, "set_cfs_material", args)
 
     async def test_cfs_mapping_then_multicolor_start(self):
         mapping = [{"id": "T1A", "type": "PLA", "color": "#FFFFFF", "boxId": 0, "materialId": 0}]

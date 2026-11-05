@@ -69,6 +69,11 @@ in the client's environment, never in committed config.
    `inspect_gcode` reads header information and time/filament estimates.
 4. Call `printer_status` to check the Hi and its `boxsInfo` CFS inventory.
    `file_limit` controls how many printer files are returned (default 20).
+   After manually replacing a spool, `set_cfs_material` can update one present,
+   editable slot while idle: box ID, material ID (A = 0), vendor, name, material
+   type, `#RRGGBB` color, and temperature range. It sends the slot's existing RFID
+   and pressure value (firmware may reassign its catalog identifier), sends only `modifyMaterial`, and needs readback through
+   `printer_status` to confirm persistence. It does not load or heat filament.
 5. Call `upload_gcode` with the artifact's `path`. It returns `remote_path`
    and a SHA-256 receipt. Upload does **not** start printing.
 6. When the user requests a physical print, call `start_print` with that

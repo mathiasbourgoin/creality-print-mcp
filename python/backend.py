@@ -322,6 +322,38 @@ async def printer(action, a):
             if isinstance(files, list):
                 status["retGcodeFileInfo2"] = files[:a.get("file_limit", 20)]
             return {"host": host(), "file_count": len(files) if isinstance(files, list) else None, "telemetry": redact(status)}
+        if action == "set_cfs_material":
+            if status.get("deviceState") != 0:
+                raise ValueError("Printer is not confirmed idle; CFS metadata was not changed")
+            box_id, material_id = a["box_id"], a["material_id"]
+            boxes = status.get("boxsInfo", {}).get("materialBoxs", [])
+            slots = [m for box in boxes if box.get("id") == box_id and box.get("type") == 0
+                     for m in box.get("materials", []) if m.get("id") == material_id]
+            if len(slots) != 1 or slots[0].get("state") != 1:
+                raise ValueError("CFS slot is not confirmed present")
+            old = slots[0]
+            if old.get("editStatus") != 1:
+                raise ValueError("CFS slot is not manually editable")
+            if not re.fullmatch(r"#[0-9a-fA-F]{6}", a["color"]):
+                raise ValueError("Expected color #RRGGBB")
+            if not 100 <= a["min_temp"] <= a["max_temp"] <= 350:
+                raise ValueError("Invalid material temperature range")
+            if a["material_type"] not in {"PLA", "PETG", "ABS", "ASA", "PET", "HIPS", "PVA", "BVOH"}:
+                raise ValueError("Unsupported material type")
+            for key in ("vendor", "name"):
+                if not isinstance(a[key], str) or not 1 <= len(a[key]) <= 80 or any(ord(c) < 32 for c in a[key]):
+                    raise ValueError("Invalid material label")
+            material = {"boxId": box_id, "id": material_id, "rfid": old.get("rfid", ""),
+                        "type": a["material_type"], "vendor": a["vendor"], "name": a["name"],
+                        "color": "#0" + a["color"][1:].upper(),
+                        "minTemp": a["min_temp"] + 1e-8, "maxTemp": a["max_temp"] + 1e-8,
+                        "pressure": old.get("pressure", 0)}
+            # Official SetMaterials shape. Metadata only: no feed, heat or motion.
+            await ws.send(json.dumps({"method": "set", "params": {"modifyMaterial": material}}))
+            after = await collect(ws, 3)
+            return {"command_sent_once": True, "requested": material,
+                    "previous": old, "observed_boxsInfo": after.get("boxsInfo"),
+                    "next_tool": "printer_status"}
         if action == "start_print":
             if status.get("deviceState") != 0:
                 raise ValueError(f"Printer is not confirmed idle (deviceState={status.get('deviceState')!r})")
@@ -556,7 +588,7 @@ def dispatch(name, a):
         return inspect_gcode(a["path"])
     if name == "upload_gcode":
         return upload_gcode(a)
-    if name in {"printer_status", "start_print", "pause_print", "resume_print", "cancel_print"}:
+    if name in {"printer_status", "set_cfs_material", "start_print", "pause_print", "resume_print", "cancel_print"}:
         return asyncio.run(printer(name, a))
     if name.startswith("orca_"):
         return orca(name, a)
