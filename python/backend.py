@@ -527,6 +527,8 @@ def orca(action, a):
         return orca_request("POST", "/api/v1/model", {"path": str(file_path(a["path"]))})
     if action == "orca_select_preset":
         return orca_request("PUT", "/api/v1/preset", a)
+    if action == "orca_save_preset":
+        return orca_request("POST", "/api/v1/preset/save", a)
     if action == "orca_set_config":
         check_changes(a["changes"])
         return orca_request("PUT", "/api/v1/config", a["changes"])

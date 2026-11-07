@@ -127,6 +127,11 @@ print presets with `orca_select_preset` (`type`: `printer`, `filament`, `print`)
 Selecting a preset can discard unsaved overrides, so select all presets before
 applying changes. Read back material type, temperatures and print settings after
 selection rather than relying only on the preset name.
+Per-filament values returned by `orca_config` are merged across project slots;
+`orca_set_config` writes one value to the filament preset open in the Filament
+tab. Use `orca_save_preset` to save edited settings under a new user name before
+switching presets. Built-in names are refused by Orca. Selecting a filament
+preset opens its editor; read back the project slot list to check assignment.
 `orca_load_model`, `orca_objects`, `orca_transform`, `orca_delete_object`,
 `orca_arrange` and `orca_orient` prepare the model. `orca_job_status` reports
 background orientation/arrangement progress. Translations (mm) and rotations

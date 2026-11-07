@@ -92,6 +92,8 @@ let tools = [
   tool "orca_load_model" "Load a model into the running OrcaSlicer GUI." ["path"] ["path",str];
   tool "orca_select_preset" "Select a printer, process or filament preset in the running OrcaSlicer." ["type";"name"]
     ["type",enum ["printer";"print";"filament"];"name",str];
+  tool "orca_save_preset" "Save the currently edited Orca preset under a user name. The vendor API refuses built-in names; no print is started." ["type";"name"]
+    ["type",enum ["printer";"print";"filament"];"name",str;"detach",bool];
   tool "orca_config" "Read effective settings in running OrcaSlicer, with credentials redacted." [] [];
   tool "orca_set_config" "Update print settings in running OrcaSlicer; scripts/G-code/connection edits are excluded." ["changes"] ["changes",obj];
   tool "orca_transform" "Transform an object. Translation (mm) and rotation (degrees) are relative increments; scale is absolute. Returned rotations are degrees." ["object_id";"transform"]

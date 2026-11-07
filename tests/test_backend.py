@@ -69,6 +69,13 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(call.call_args.args[2], {"rotate": [90, 0, 0]})
         self.assertEqual(result["transform"]["rotation"], [180, 0, 0])
 
+    def test_save_orca_user_preset_does_not_start_print(self):
+        args = {"type": "filament", "name": "PLA prototype", "detach": False}
+        with patch.object(b, "orca_request", return_value={"saved": args["name"], "created": True}) as call:
+            result = b.dispatch("orca_save_preset", args)
+        call.assert_called_once_with("POST", "/api/v1/preset/save", args)
+        self.assertTrue(result["created"])
+
     def test_camera_registration_and_legacy_idempotence(self):
         stream = "http://127.0.0.1:8000/webcam/?action=stream"
         camera = {"name": "Creality Hi", "service": "iframe", "stream_url": stream}
